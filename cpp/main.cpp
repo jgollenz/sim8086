@@ -3,6 +3,12 @@
 #include <filesystem>
 #include <bitset>
 #include <vector>
+#include <cstdint>
+
+using u8  = std::uint8_t;
+using u16 = std::uint16_t;
+using i8  = std::int8_t;
+using i16 = std::int16_t;
 
 void printHelp() {
     std::cout << "USAGE:\n\n";
@@ -31,13 +37,43 @@ std::string output = "bits 16\n\n";
 
 bool parseByte(unsigned char* &runner) {
     unsigned char byte = *runner;
-    unsigned char instruction = byte >> 2;
-    unsigned char direction_field = (byte & 0b10) >> 1;
-    unsigned char word_field = byte & 0b1;
+    unsigned char instruction;
 
+    // handle possible 4-bit witdth
+    instruction = byte >> 4;
     switch (instruction) {
-        case 0b100010: { // mov
+        case 0b1011: { // mov (immediate to register)
             output += "mov ";
+
+            unsigned char word_field = (byte & 0b1000) >> 3;
+            unsigned char reg_field = byte & 0b1111;
+
+            output += REGISTER_TABLE[reg_field] + ", ";
+
+            byte = *(++runner);
+
+            std::int16_t data = reinterpret_cast<char&>(byte);
+
+            if (word_field) {
+                data = *reinterpret_cast<std::int16_t*>(runner);
+                ++runner;
+            }
+
+            output += std::to_string(data) + "\n";
+
+            return true;
+        }
+    }
+
+
+    // handle possible 6-bit witdth
+    instruction = byte >> 2;
+    switch (instruction) {
+        case 0b100010: { // mov (register/memory to/from register)
+            output += "mov ";
+
+            unsigned char direction_field = (byte & 0b10) >> 1;
+            unsigned char word_field = byte & 0b1;
 
             // TODO: look ahead if we have enough bytes left
             ++runner;
@@ -75,7 +111,7 @@ bool parseByte(unsigned char* &runner) {
                     return false;
                 }
             }
-            break;
+            return true;
         }
 
         default: {
@@ -84,7 +120,7 @@ bool parseByte(unsigned char* &runner) {
         }
     }
 
-    return true;
+    return false;
 }
 
 bool parseData(const unsigned char* data, unsigned int size) {
