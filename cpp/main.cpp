@@ -33,6 +33,16 @@ const std::vector<std::string> REGISTER_TABLE = {
         "si",
         "di"};
 
+const std::vector<std::string> EFFECTIVE_ADDRESS_CALCULATION_TABLE = {
+        "bx + si",
+        "bx + di",
+        "bp + si",
+        "bp + di",
+        "si",
+        "di",
+        "bp",
+        "bx"};
+
 std::string output = "bits 16\n\n";
 
 bool parseByte(unsigned char* &runner) {
@@ -42,7 +52,8 @@ bool parseByte(unsigned char* &runner) {
     // handle possible 4-bit witdth
     instruction = byte >> 4;
     switch (instruction) {
-        case 0b1011: { // mov (immediate to register)
+        // mov (immediate to register)
+        case 0b1011: {
             output += "mov ";
 
             unsigned char word_field = (byte & 0b1000) >> 3;
@@ -52,10 +63,10 @@ bool parseByte(unsigned char* &runner) {
 
             byte = *(++runner);
 
-            std::int16_t data = reinterpret_cast<char&>(byte);
+            i16 data = reinterpret_cast<char&>(byte);
 
             if (word_field) {
-                data = *reinterpret_cast<std::int16_t*>(runner);
+                data = *reinterpret_cast<i16*>(runner);
                 ++runner;
             }
 
@@ -69,7 +80,8 @@ bool parseByte(unsigned char* &runner) {
     // handle possible 6-bit witdth
     instruction = byte >> 2;
     switch (instruction) {
-        case 0b100010: { // mov (register/memory to/from register)
+        // mov (register/memory to/from register)
+        case 0b100010: {
             output += "mov ";
 
             unsigned char direction_field = (byte & 0b10) >> 1;
@@ -86,22 +98,57 @@ bool parseByte(unsigned char* &runner) {
             unsigned char reg_one_index = (word_field << 3) | reg_field;
             std::string register_one = REGISTER_TABLE[reg_one_index];
 
+            std::string destination;
+            std::string source;
             switch (mode_field) {
+                // memory-mode, no displacement (except for r/m = 110)
+                case 0b0: {
+                    if (rm_field == 0b110) {
+                        // direct access
+
+                        i16 data = *reinterpret_cast<i16*>(++runner);
+                        ++runner;
+
+                        source = register_one;
+                        destination = "[" + std::to_string(data) + "]";
+                    } else {
+                        source = register_one;
+                        destination = "[" + EFFECTIVE_ADDRESS_CALCULATION_TABLE[rm_field] + "]";
+                    }
+
+                    break;
+                }
+                // memory-mode, 8-bit displacement
+                case 0b1: {
+                    source = register_one;
+                    i8 data = *reinterpret_cast<i8*>(++runner);
+                    destination = "[" + EFFECTIVE_ADDRESS_CALCULATION_TABLE[rm_field];
+                    if (data > 0) {
+                        destination += " + " + std::to_string(data);
+                    }
+                    destination += "]";
+
+                    break;
+                }
+                // memory-mode, 16-bit displacement
+                case 0b10: {
+                    source = register_one;
+                    i16 data = *reinterpret_cast<i16*>(++runner);
+                    ++runner;
+                    destination = "[" + EFFECTIVE_ADDRESS_CALCULATION_TABLE[rm_field];
+                    if (data > 0) {
+                        destination += " + " + std::to_string(data);
+                    }
+                    destination += "]";
+
+                    break;
+                }
                 // register-to-register mode
                 case 0b11: {
                     std::string register_two = REGISTER_TABLE[(word_field << 3) | rm_field];
 
-                    std::string destination;
-                    std::string source;
-                    if (direction_field) {
-                        destination = register_one;
-                        source = register_two;
-                    } else {
-                        destination = register_two;
-                        source = register_one;
-                    }
-
-                    output += destination + ", " + source + "\n";
+                    source = register_one;
+                    destination = register_two;
 
                     break;
                 }
@@ -111,6 +158,13 @@ bool parseByte(unsigned char* &runner) {
                     return false;
                 }
             }
+
+            if (direction_field) {
+                std::string tmp = source;
+                source = destination;
+                destination = tmp;
+            }
+            output += destination + ", " + source + "\n";
             return true;
         }
 
@@ -159,6 +213,7 @@ int main(int argc, char** argv) {
 
     if (!success) {
         std::cout << "Exiting with error\n";
+        std::cout << output << std::endl;
         return 1;
     }
 
